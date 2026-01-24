@@ -1,128 +1,131 @@
 # AccordionTable
 
-A wrapper for a diffable data source which facilitates collapsible table view sections. You may want to disable floating headers (see [demo](https://github.com/nashysolutions/MeltingList) app).
+A small wrapper around Apple’s diffable data source API that enables **collapsible table view sections** in a **predictable, explicit way**.
+
+Designed for UIKit codebases that want accordion-style behaviour **without leaking UI state into models or snapshots**.
+
+---
+
+## Why this exists
+
+In UIKit apps that use diffable data sources, collapsible sections are a common requirement — settings screens, filters, grouped lists, etc.
+
+In production codebases, this often leads to the same set of trade-offs appearing repeatedly:
+- UI selection or expansion state creeping into models
+- `Hashable` conformance being distorted to force reload behaviour
+- Accordion logic spread across view controllers and delegates
+- Snapshot updates that are difficult to reason about or debug
+
+This library is a deliberate response to those patterns.
+
+It provides a small, explicit layer that manages accordion behaviour **without violating the core assumptions of diffable data sources**:
+- snapshots describe data, not UI state
+- identity remains stable and meaningful
+- interaction state is tracked separately and predictably
+
+The goal is not to abstract UIKit, but to make a common interaction pattern easier to implement **consistently and safely** across a real codebase.
+
+---
+
+## What it is
+
+- A lightweight wrapper over `UITableViewDiffableDataSource`
+- Manages expandable / collapsible sections
+- Explicitly tracks selection state outside of snapshots
+- Requires no magic
+- Designed to be easy to reason about and debug
+
+---
+
+## What it deliberately avoids
+
+- Implicit state hidden in models
+- Mutating hashable values to drive UI
+- Custom table view subclasses
+- Non-deterministic reload behaviour
+- Cleverness that fights Apple’s APIs
+
+---
+
+## Example behaviour
 
 <img src="https://user-images.githubusercontent.com/64097812/150280515-64bbcc1b-ba85-4c56-bd4a-0b77be008e8c.gif" width="300"/>
 
-## Implementation
+---
 
-The following steps are for a typical table view implementation.
+## Usage overview
 
-### Prepare a model
+At a high level, you:
 
-<details>
-    <summary>Example</summary>
+1. Create a normal diffable data source
+2. Wrap it in `AccordionTable`
+3. Forward a small set of delegate events
+4. Update snapshots as usual
 
-    ```swift
-    struct Food: Hashable {
-        let id: UUID
-        let title: String
-        let items: [Item] // rows
-    }
+The library handles the rest.
 
-    struct Item: Hashable {
-        let id: UUID
-        let title: String
-    }
-    ```
-</details>
+A full, real-world example can be seen here:  
+👉 https://github.com/nashysolutions/MeltingList/blob/main/MeltingList/ListViewController.swift
 
-### Prepare an instance of `AccordionTable`.
+---
 
-<details>
-    <summary>Show me</summary>
-    
-    ```swift
-    let tableDataSource = UITableViewDiffableDataSource<Food, Item>(
-        tableView: tableView,
-        cellProvider: cellProvider
-    )
-    
-    let diffableTableManager = AccordionTable<Food, Item>(
-        dataSource: tableDataSource,
-        headerProvider: headerProvider
-    )
-    ```
-</details>
-
-> The `AccordionTable` type also has an `enabledFeatures` parameter.
-
-### Prepare a table view delegate.
-
-<details>
-    <summary>Show me</summary>
-    
-    ```swift
-    class TypicalTableViewDelegate: NSObject, UITableViewDelegate {
-    
-        let tableManager: AccordionTable<Food, Item>
-        
-        init(_ tableManager: AccordionTable<Food, Item>) {
-            self.tableManager = tableManager
-        }
-        
-        func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-            tableManager.viewForHeader(in: tableView, at: section)
-        }
-        
-        func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-            tableManager.selectRowIfNeeded(in: tableView, at: indexPath)
-        }
-        
-        func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-            guard let isSelected = tableManager.toggleSelectedStateForRow(at: indexPath) else {
-                return
-            }
-            if !isSelected {
-                tableView.deselectRow(at: indexPath, animated: true)
-            }
-        }
-        
-        func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-            tableManager.saveDeselectedStateForRow(at: indexPath)
-        }
-        
-        func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-            return 0 // your header height
-        }
-    }
-    ```
-</details>
-
-### Map your data
+## Minimal setup
 
 ```swift
-let data = [Food: [Item]]()
+let dataSource = UITableViewDiffableDataSource<Section, Row>(
+    tableView: tableView,
+    cellProvider: cellProvider
+)
+
+let accordionTable = AccordionTable<Section, Row>(
+    dataSource: dataSource,
+    headerProvider: headerProvider
+)
+
+func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+    accordionTable.viewForHeader(in: tableView, at: section)
+}
+
+func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+    accordionTable.toggleSelectedStateForRow(at: indexPath)
+}
 ```
 
-## Usage 
-
-To reload the data, call the following on your instance of `AccordionTable`.
+Forward relevant delegate callbacks:
 
 ```swift
-func update(with data: [Food, [Item]], animated: true)
+func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+    accordionTable.viewForHeader(in: tableView, at: section)
+}
+
+func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+    accordionTable.toggleSelectedStateForRow(at: indexPath)
+}
 ```
 
-> On initial load, pass `animated: false`.
+Update data using your existing diffable snapshots.
 
-To programmatically select a row.
 
-```swift
-diffableTableManager.saveSelectedStateForRow(at: indexPath)
-tableView.selectRow(at: indexPath, animated: animated, scrollPosition: scrollPosition)
-``` 
+## Design principles
 
-To programmatically deselect a row.
+* UI state is not model state
+Selection and expansion are tracked independently from snapshot data.
+* Diffable snapshots stay pure
+Hashable conformance reflects identity, not UI concerns.
+* Explicit over clever
+Behaviour is driven by clear calls, not side effects.
+* Predictable updates
+No unexpected reloads or section churn.
 
-```swift
-diffableTableManager.saveDeselectedStateForRow(at: indexPath)
-tableView.deselectRow(at: indexPath, animated: animated)
-```
+⸻
 
-## Side Note
-    
-Consider avoiding any user interface state management in your model structures (and hashable implementation), such as `isHighlighted`, as this will be destroyed per snapshot (use a backing store instead, such as a `Set` or `key/value` collection - see [demo](https://github.com/nashysolutions/MeltingList) app).
+## When to use this
 
-If your user interface is reloading more rows/sections than it should, it is likely the hashable implementation to blame. It seems each row must be unique within the entire dataset (not just within the section it belongs). Use GUID's on your dataset to achieve this. Alternatively, at the row level, make a reference to the section in which that row belongs (be careful of retain cycle when using classes) and use that in the hashable implementation of the row.
+Use AccordionTable if you:
 
-> If you need to use `reloadItems(_ identifiers: [ItemIdentifierType])` then you will need to use class's for your model.
+* already use diffable data sources
+* want collapsible sections
+* care about predictable behaviour
+* want to keep view controller code boring and readable
+
+If you’re building a fully custom list system or want SwiftUI-style declarative state, this is probably not the right tool.
